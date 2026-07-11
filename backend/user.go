@@ -3,9 +3,12 @@ package backend
 import (
 	"fmt"
 
+	"charm.land/bubbles/v2/help"
 	"charm.land/bubbles/v2/textinput"
 	"github.com/google/uuid"
 )
+
+type focusedInput int
 
 type User struct {
 	Id   string
@@ -13,13 +16,15 @@ type User struct {
 
 	Room *Room
 
-	textinput textinput.Model
-	err       error
+	ui *UserUI
 }
 
 type UserUI struct {
-	textInput textinput.Model
-	err       error
+	nameInput textinput.Model
+	roomInput textinput.Model
+	focused   focusedInput
+
+	help help.Model
 }
 
 func (u *User) JoinRoom(room *Room) error {
@@ -30,18 +35,30 @@ func (u *User) JoinRoom(room *Room) error {
 	return nil
 }
 
-func CreateUser(name string) *User {
+func newInput(placeholder string, focus bool) textinput.Model {
 	ti := textinput.New()
-	ti.Placeholder = name
-	// ti.SetVirtualCursor(false)
-	ti.Focus()
+	ti.Placeholder = placeholder
 	ti.CharLimit = 50
 	ti.SetWidth(20)
 
+	if focus {
+		ti.Focus()
+	}
+
+	return ti
+}
+
+func CreateUser(name string) *User {
+	h := help.New()
+	h.SetWidth(40)
+
 	return &User{
-		Id:        uuid.New().String(),
-		Name:      name,
-		err:       nil,
-		textinput: ti,
+		Id:   uuid.New().String(),
+		Name: name,
+		ui: &UserUI{
+			nameInput: newInput(name, true),
+			roomInput: newInput("", false),
+			help:      h,
+		},
 	}
 }
