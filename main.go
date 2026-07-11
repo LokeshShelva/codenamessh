@@ -1,48 +1,91 @@
 package main
 
 import (
-	"fmt"
-	"github.com/charmbracelet/bubbletea"
+	"context"
+	"errors"
+	"net"
 	"os"
+	"os/signal"
+	"syscall"
+	"time"
+
+	"github.com/LokeshShelva/codenamessh/backend"
+
+	tea "charm.land/bubbletea/v2"
+	"charm.land/log/v2"
+	"charm.land/wish/v2"
+	"charm.land/wish/v2/bubbletea"
+	"charm.land/wish/v2/logging"
+	"github.com/charmbracelet/ssh"
 )
 
-type model struct {
-	count int
-}
+const (
+	host = "localhost"
+	port = "6767"
+)
 
-func (m model) Init() tea.Cmd {
-	return nil
-}
+func bubbleTeaHandler() wish.Middleware {
+	newProg := func(m tea.Model, opts ...tea.ProgramOption) *tea.Program {
+		p := tea.NewProgram(m, opts...)
 
-func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	switch msg := msg.(type) {
+		go func() {
+			for {
+				<-time.After(1 * time.Second)
+				p.Send(backend.TimeMsg(time.Now()))
+			}
 
-	case tea.KeyMsg:
+		}()
+		return p
+	}
 
-		switch msg.String() {
-
-		case "ctrl+c", "q":
-			return m, tea.Quit
-
-		case "up":
-			m.count++
-
+	teaHandler := func(s ssh.Session) *tea.Program {
+		_, _, active := s.Pty()
+		if !active {
+			wish.Fatalln(s, "no active terminal, skipping")
+			return nil
 		}
 
-	}
-	return m, nil
-}
+		user := backend.CreateUser(s.User())
+		log.Info("user connected", "id", user.Id, "name", user.Name)
 
-func (m model) View() string {
-	return fmt.Sprintf("Count: %d", m.count)
+		return newProg(user, bubbletea.MakeOptions(s)...)
+	}
+	return bubbletea.MiddlewareWithProgramHandler(teaHandler)
 }
 
 func main() {
-	p := tea.NewProgram(model{count: 0})
-	_, err := p.Run()
+	s, err := wish.NewServer(
+		ssh.AllocatePty(),
+		wish.WithAddress(net.JoinHostPort(host, port)),
+		wish.WithHostKeyPath(".ssh/id_ed25519"),
+		wish.WithMiddleware(
+			bubbleTeaHandler(),
+			logging.Middleware(),
+		),
+	)
 
 	if err != nil {
-		fmt.Printf("Error while running app.\n%v", err)
-		os.Exit(1)
+		log.Error("could not start ssh server", "error", err)
+	}
+
+	done := make(chan os.Signal, 1)
+	signal.Notify(done, os.Interrupt, syscall.SIGINT, syscall.SIGTERM)
+	log.Info("starting ssh server", "host", host, "port", port)
+
+	go func() {
+		if err = s.ListenAndServe(); err != nil && !errors.Is(err, ssh.ErrServerClosed) {
+			log.Error("could not start server", "error", err)
+			done <- nil
+		}
+	}()
+
+	<-done
+
+	log.Info("stopping ssh server")
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer func() { cancel() }()
+
+	if err = s.Shutdown(ctx); err != nil && !errors.Is(err, ssh.ErrServerClosed) {
+		log.Error("could not stop server", "error", err)
 	}
 }
