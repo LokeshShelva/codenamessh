@@ -3,62 +3,57 @@ package backend
 import (
 	"fmt"
 
-	"charm.land/bubbles/v2/help"
-	"charm.land/bubbles/v2/textinput"
-	"github.com/google/uuid"
+	tea "charm.land/bubbletea/v2"
 )
 
-type focusedInput int
+type Actionkind int
 
-type User struct {
-	Id   string
-	Name string
+const (
+	LeaveRoomAct Actionkind = 0
+)
 
-	Room *Room
-
-	ui *UserUI
+type Action struct {
+	PlayerID string
+	Kind     Actionkind
+	Payload  any
 }
 
-type UserUI struct {
-	nameInput textinput.Model
-	roomInput textinput.Model
-	focused   focusedInput
-
-	help help.Model
+type Player struct {
+	id                string
+	room              *Room
+	broadCastMsgCount int
 }
 
-func (u *User) JoinRoom(room *Room) error {
-	if u.Room != nil {
-		return fmt.Errorf("connot join new room '%s'. user is already part room '%s'", room.Id, u.Room.Id)
-	}
-	u.Room = room
+func (u *Player) Init() tea.Cmd {
 	return nil
 }
 
-func newInput(placeholder string, focus bool) textinput.Model {
-	ti := textinput.New()
-	ti.Placeholder = placeholder
-	ti.CharLimit = 50
-	ti.SetWidth(20)
+func (u *Player) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch m := msg.(type) {
+	case tea.KeyPressMsg:
+		switch m.String() {
+		case "ctrl+c":
+			u.room.Actions <- Action{PlayerID: u.id, Kind: LeaveRoomAct}
+			return u, tea.Quit
+		case "a":
+			u.room.Actions <- Action{PlayerID: u.id, Kind: 1}
+		}
 
-	if focus {
-		ti.Focus()
+	case RoomUpdateMss:
+		u.broadCastMsgCount += 1
 	}
 
-	return ti
+	return u, nil
 }
 
-func CreateUser(name string) *User {
-	h := help.New()
-	h.SetWidth(40)
+func (u *Player) View() tea.View {
+	return tea.NewView(fmt.Sprintf("Hello from %s\n\nBroadCast Count: %d", u.id, u.broadCastMsgCount))
+}
 
-	return &User{
-		Id:   uuid.New().String(),
-		Name: name,
-		ui: &UserUI{
-			nameInput: newInput(name, true),
-			roomInput: newInput("", false),
-			help:      h,
-		},
+func NewPlayer(playerId string, room *Room) *Player {
+	return &Player{
+		id:                playerId,
+		room:              room,
+		broadCastMsgCount: 0,
 	}
 }

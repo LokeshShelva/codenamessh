@@ -24,20 +24,9 @@ const (
 	port = "6767"
 )
 
+var room = backend.NewRoom()
+
 func bubbleTeaHandler() wish.Middleware {
-	newProg := func(m tea.Model, opts ...tea.ProgramOption) *tea.Program {
-		p := tea.NewProgram(m, opts...)
-
-		go func() {
-			for {
-				<-time.After(1 * time.Second)
-				p.Send(backend.TimeMsg(time.Now()))
-			}
-
-		}()
-		return p
-	}
-
 	teaHandler := func(s ssh.Session) *tea.Program {
 		_, _, active := s.Pty()
 		if !active {
@@ -45,10 +34,19 @@ func bubbleTeaHandler() wish.Middleware {
 			return nil
 		}
 
-		user := backend.CreateUser(s.User())
-		log.Info("user connected", "id", user.Id, "name", user.Name)
+		playerId := s.Context().SessionID()
+		player := backend.NewPlayer(playerId, room)
 
-		return newProg(user, bubbletea.MakeOptions(s)...)
+		p := tea.NewProgram(player, bubbletea.MakeOptions(s)...)
+
+		err := room.Join(playerId, p)
+		if err != nil {
+			log.Error("failed to join room", "error", err)
+			return nil
+		}
+
+		log.Info("new player connection", "playerId", playerId)
+		return p
 	}
 	return bubbletea.MiddlewareWithProgramHandler(teaHandler)
 }
@@ -72,16 +70,28 @@ func main() {
 	signal.Notify(done, os.Interrupt, syscall.SIGINT, syscall.SIGTERM)
 	log.Info("starting ssh server", "host", host, "port", port)
 
+	// Global server tick of 500 MS
+	// TODO: this needs to be made to tick independantly for each room
+	go func() {
+		for {
+			<-time.After(500 * time.Millisecond)
+			room.Run()
+		}
+
+	}()
+
+	// Start SSH server
 	go func() {
 		if err = s.ListenAndServe(); err != nil && !errors.Is(err, ssh.ErrServerClosed) {
-			log.Error("could not start server", "error", err)
+			log.Error("could not start server :(", "error", err)
 			done <- nil
 		}
 	}()
 
+	// Wait for Interrupt signal
 	<-done
 
-	log.Info("stopping ssh server")
+	log.Info("stopping ssh server. See you again soon :)")
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer func() { cancel() }()
 
