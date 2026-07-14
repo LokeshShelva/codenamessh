@@ -12,17 +12,41 @@ type RoomUpdateMss struct {
 	State any
 }
 
+// This is the room in the server.
+// Keeps track all the joined players (clients) in the room.
+// Processing and sending updates to the connected clients
+// Does not manage the game state. Deligates that to the game
+// struct.
 type Room struct {
-	Id      string
+	// Id of the room
+	Id string
+
+	// Listens on this for messagae from the clients
 	Actions chan Action
 
-	mu       sync.Mutex
-	programs map[string]*tea.Program // player id -> their programs
-	done     chan struct{}
+	// shared mutext for map access
+	mu sync.Mutex
+
+	// Map of connected client `tea.Program` to the playerId
+	programs map[string]*tea.Program
+
+	// Listens on this for closing the room
+	done chan struct{}
 }
 
-// Clean a room if not user is present
-// This is close the channel
+// Send updates to all the connected clients.
+// TODO: decide on what each update contains (mostly a game state snapshot)
+func (r *Room) broadcast() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	for id, p := range r.programs {
+		p.Send(RoomUpdateMss{State: "helllo"})
+		_ = id // TODO: remove
+	}
+}
+
+// Clean a room if no client is connected. Closes all the channels
 func (r *Room) clean() bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -36,6 +60,7 @@ func (r *Room) clean() bool {
 	return !isUserPresent
 }
 
+// Join this room.
 func (r *Room) join(playerId string, program *tea.Program) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -47,6 +72,7 @@ func (r *Room) join(playerId string, program *tea.Program) error {
 	return nil
 }
 
+// Leave this room
 func (r *Room) leave(playerId string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -58,6 +84,8 @@ func (r *Room) leave(playerId string) error {
 	return nil
 }
 
+// Main processing method that listens for updates and
+// delegates to the game struct.
 func (r *Room) run() {
 	for {
 		select {
@@ -73,16 +101,6 @@ func (r *Room) run() {
 		case <-r.done:
 			return
 		}
-	}
-}
-
-func (r *Room) broadcast() {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
-	for id, p := range r.programs {
-		p.Send(RoomUpdateMss{State: "helllo"})
-		_ = id // TODO: remove
 	}
 }
 

@@ -8,18 +8,25 @@ import (
 
 type Actionkind int
 
+// Struct that contains the action
+// player take
 type Action struct {
 	PlayerID string
 	Kind     Actionkind
 	Payload  any
 }
 
+// Actual `tea.Modal` use for displaying the client.
+// TODO: Might change in the future
 type Player struct {
 	id                string
 	room              *Room
 	broadCastMsgCount int
 }
 
+// Assign a room to this player. After joining a room in the server, the room
+// reference should be set here (the client) so that actions can backend
+// sent to this room
 func (p *Player) SetRoom(room *Room) {
 	p.room = room
 }
