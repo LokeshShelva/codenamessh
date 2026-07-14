@@ -2,6 +2,7 @@ package backend
 
 import (
 	"fmt"
+	"sync"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/log/v2"
@@ -12,45 +13,44 @@ type RoomUpdateMss struct {
 }
 
 type Room struct {
-	Actions  chan Action
+	Id      string
+	Actions chan Action
+
+	mu       sync.Mutex
 	programs map[string]*tea.Program // player id -> their programs
+	done     chan struct{}
 }
 
-func (r *Room) broadcast() {
-	for id, p := range r.programs {
-		p.Send(RoomUpdateMss{State: "helllo"})
-		_ = id // TODO: remove
+// Clean a room if not user is present
+// This is close the channel
+func (r *Room) clean() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	isUserPresent := len(r.programs) != 0
+
+	if !isUserPresent {
+		close(r.done)
 	}
+
+	return !isUserPresent
 }
 
-func (r *Room) Run() {
-	for action := range r.Actions {
-		log.Info("New Action", "playerId", action.PlayerID, "kind", action.Kind, "playload", action.Payload)
+func (r *Room) join(playerId string, program *tea.Program) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 
-		// process action from user
-		switch action.Kind {
-		case LeaveRoomAct:
-			if err := r.leave(action.PlayerID); err != nil {
-				log.Error("failed to leave room", "playerId", action.PlayerID)
-			}
-			log.Info("player left room", "playerId", action.PlayerID)
-		}
-
-		// send updates to all connected clients
-		r.broadcast()
-	}
-}
-
-func (r *Room) Join(playerId string, program *tea.Program) error {
 	if r.programs[playerId] != nil {
 		return fmt.Errorf("player %s already present in room", playerId)
 	}
 	r.programs[playerId] = program
-	log.Info("player added to room", "playerId", playerId)
 	return nil
 }
 
 func (r *Room) leave(playerId string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
 	if r.programs[playerId] == nil {
 		return fmt.Errorf("player %s is not in room.", playerId)
 	}
@@ -58,9 +58,39 @@ func (r *Room) leave(playerId string) error {
 	return nil
 }
 
-func NewRoom() *Room {
+func (r *Room) run() {
+	for {
+		select {
+		case action := <-r.Actions:
+			log.Info("New Action", "playerId", action.PlayerID, "kind", action.Kind, "playload", action.Payload)
+
+			// process action from user
+			// ...
+
+			// send updates to all connected clients
+			r.broadcast()
+
+		case <-r.done:
+			return
+		}
+	}
+}
+
+func (r *Room) broadcast() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	for id, p := range r.programs {
+		p.Send(RoomUpdateMss{State: "helllo"})
+		_ = id // TODO: remove
+	}
+}
+
+func NewRoom(id string) *Room {
 	return &Room{
+		Id:       id,
 		Actions:  make(chan Action),
 		programs: make(map[string]*tea.Program),
+		done:     make(chan struct{}),
 	}
 }
