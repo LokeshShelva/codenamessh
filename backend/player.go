@@ -8,10 +8,6 @@ import (
 
 type Actionkind int
 
-const (
-	LeaveRoomAct Actionkind = 0
-)
-
 type Action struct {
 	PlayerID string
 	Kind     Actionkind
@@ -24,6 +20,10 @@ type Player struct {
 	broadCastMsgCount int
 }
 
+func (p *Player) SetRoom(room *Room) {
+	p.room = room
+}
+
 func (u *Player) Init() tea.Cmd {
 	return nil
 }
@@ -33,7 +33,6 @@ func (u *Player) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyPressMsg:
 		switch m.String() {
 		case "ctrl+c":
-			u.room.Actions <- Action{PlayerID: u.id, Kind: LeaveRoomAct}
 			return u, tea.Quit
 		case "a":
 			u.room.Actions <- Action{PlayerID: u.id, Kind: 1}
@@ -50,10 +49,9 @@ func (u *Player) View() tea.View {
 	return tea.NewView(fmt.Sprintf("Hello from %s\n\nBroadCast Count: %d", u.id, u.broadCastMsgCount))
 }
 
-func NewPlayer(playerId string, room *Room) *Player {
+func NewPlayer(playerId string) *Player {
 	return &Player{
 		id:                playerId,
-		room:              room,
 		broadCastMsgCount: 0,
 	}
 }

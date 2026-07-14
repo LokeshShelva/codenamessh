@@ -24,7 +24,7 @@ const (
 	port = "6767"
 )
 
-var room = backend.NewRoom()
+var server = backend.NewServer()
 
 func bubbleTeaHandler() wish.Middleware {
 	teaHandler := func(s ssh.Session) *tea.Program {
@@ -35,17 +35,24 @@ func bubbleTeaHandler() wish.Middleware {
 		}
 
 		playerId := s.Context().SessionID()
-		player := backend.NewPlayer(playerId, room)
+		player := backend.NewPlayer(playerId)
 
 		p := tea.NewProgram(player, bubbletea.MakeOptions(s)...)
 
-		err := room.Join(playerId, p)
+		roomID := "124"
+		room, err := server.CreateOrJoinRoom(playerId, roomID, p)
 		if err != nil {
-			log.Error("failed to join room", "error", err)
+			log.Error("Failed to join room", "roomId", roomID, "playerId", playerId, "error", err)
 			return nil
 		}
+		player.SetRoom(room)
 
-		log.Info("new player connection", "playerId", playerId)
+		go func() {
+			<-s.Context().Done()
+			server.LeaveRoom(playerId, room.Id)
+		}()
+
+		log.Info("new player connection", "playerId", playerId, "roomId", room.Id)
 		return p
 	}
 	return bubbletea.MiddlewareWithProgramHandler(teaHandler)
@@ -70,12 +77,11 @@ func main() {
 	signal.Notify(done, os.Interrupt, syscall.SIGINT, syscall.SIGTERM)
 	log.Info("starting ssh server", "host", host, "port", port)
 
-	// Global server tick of 500 MS
-	// TODO: this needs to be made to tick independantly for each room
+	// Garbase collect rooms with no users
 	go func() {
 		for {
-			<-time.After(500 * time.Millisecond)
-			room.Run()
+			<-time.After(10 * time.Second)
+			server.CleanRooms()
 		}
 
 	}()
